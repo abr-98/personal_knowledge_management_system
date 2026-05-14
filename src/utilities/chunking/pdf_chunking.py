@@ -4,6 +4,8 @@ import uuid
 
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+from entity_handlers.entity_extractor import extract_metadata
+from entity_handlers.relationship_extractor_auto import extract_relationships
 
 
 # =========================================================
@@ -355,6 +357,8 @@ def semantic_pdf_chunking(pdf_path):
             "chunk_id": str(uuid.uuid4()),
 
             "text": chunk,
+            
+            "entities": extract_metadata(chunk)["entities"],
 
             "source": pdf_path,
 
@@ -374,6 +378,13 @@ def semantic_pdf_chunking(pdf_path):
                 )
             )
         })
+    
+    for chunk in all_chunks:
+        if len(chunk) > 0:
+            relationships = extract_relationships(
+                chunk["text"],
+                [i["text"] for i in chunk["entities"]])
+            chunk["relationships"] = relationships
 
     return all_chunks
 

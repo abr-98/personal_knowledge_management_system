@@ -4,6 +4,8 @@ import uuid
 
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+from entity_handlers.entity_extractor import extract_metadata
+from entity_handlers.relationship_extractor_auto import extract_relationships
 
 
 # =========================================================
@@ -574,6 +576,8 @@ def chunk_research_paper(
                 "section": section_name,
 
                 "text": chunk_text,
+                
+                "entities": extract_metadata(chunk_text)["entities"],
 
                 "source": pdf_path,
 
@@ -596,4 +600,11 @@ def chunk_research_paper(
 
         parent_id += 1
 
+    for chunk in final_chunks:
+        if len(chunk) > 0:
+            relationships = extract_relationships(
+                chunk["text"],
+                [i["text"] for i in chunk["entities"]])
+            chunk["relationships"] = relationships
+        
     return final_chunks

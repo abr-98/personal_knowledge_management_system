@@ -1,5 +1,7 @@
 import uuid
 import tiktoken
+from entity_handlers.entity_extractor import extract_metadata
+from entity_handlers.relationship_extractor_auto import extract_relationships
 
 
 # =========================================================
@@ -71,6 +73,8 @@ def fixed_size_chunker(
             "chunk_id": str(uuid.uuid4()),
 
             "text": chunk_text,
+            
+            "entities": extract_metadata(chunk_text)["entities"],
 
             "start_token": start,
             "end_token": end,
@@ -113,43 +117,19 @@ def chunk_file(
         overlap=overlap,
         model_name=model_name
     )
+    
+    for chunk in chunks:
+        if len(chunk) > 0:
+            relationships = extract_relationships(
+                chunk["text"],
+                [i["text"] for i in chunk["entities"]])
+            chunk["relationships"] = relationships
 
     # Add source metadata
     for chunk in chunks:
 
         chunk["source"] = file_path
+        
+    
 
     return chunks
-
-
-# =========================================================
-# EXAMPLE USAGE
-# =========================================================
-if __name__ == "__main__":
-
-    chunks = chunk_file(
-        file_path="sample.txt",
-        chunk_size=500,
-        overlap=100
-    )
-
-    print(f"\nTotal Chunks: {len(chunks)}\n")
-
-    for chunk in chunks[:3]:
-
-        print("=" * 100)
-
-        print(f"Chunk ID: {chunk['chunk_id']}")
-
-        print(
-            f"Tokens: "
-            f"{chunk['start_token']} "
-            f"-> "
-            f"{chunk['end_token']}"
-        )
-
-        print("\nText:\n")
-
-        print(chunk["text"][:500])
-
-        print("\n")

@@ -3,6 +3,8 @@ import uuid
 
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+from entity_handlers.entity_extractor import extract_metadata
+from entity_handlers.relationship_extractor_auto import extract_relationships
 
 
 # =========================================================
@@ -206,6 +208,7 @@ def chunk_srt_transcript(
 
                 # Retrieval text
                 "text": entry["text"],
+                "entities": extract_metadata(entry["text"])["entities"],
 
                 # Parent conversational context
                 "parent_context": parent_text,
@@ -217,5 +220,13 @@ def chunk_srt_transcript(
                 # Ordering
                 "child_index": child_idx
             })
+    
+    for chunk in final_chunks:
+        if len(chunk) > 0:
+            relationships = extract_relationships(
+                chunk["text"],
+                [i["text"] for i in chunk["entities"]])
+            chunk["relationships"] = relationships      
+    
 
     return final_chunks

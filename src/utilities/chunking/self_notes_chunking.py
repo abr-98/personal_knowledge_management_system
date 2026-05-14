@@ -6,6 +6,8 @@ import numpy as np
 from markdown_it import MarkdownIt
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+from entity_handlers.entity_extractor_markdown import extract_markdown_entities
+from entity_handlers.relationship_extractor_auto import extract_relationships
 
 
 # =========================================================
@@ -218,6 +220,7 @@ def chunk_markdown_note(
 
                 # Text
                 "text": chunk_text,
+                "entities": extract_markdown_entities(chunk_text)["entities"],
                 "parent_text": parent_text,
 
                 # Graph metadata
@@ -230,5 +233,13 @@ def chunk_markdown_note(
                 # Useful later
                 "child_index": child_idx
             })
+            
+    for chunk in final_chunks:
+        if len(chunk) > 0:
+            relationships = extract_relationships(
+                chunk["text"],
+                [i for i in chunk["entities"]])
+            chunk["relationships"] = relationships
+        
 
     return final_chunks

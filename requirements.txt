@@ -11,3 +11,4 @@ scikit-learn
 markdown-it-py
 ipykernel
 keybert
+yake

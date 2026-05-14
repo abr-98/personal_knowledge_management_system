@@ -1,18 +1,55 @@
+"""
+Improved PKMS Entity Extractor
+------------------------------
+Goal:
+- Remove useless entities
+- Remove integers/numeric junk
+- Remove stopword-heavy phrases
+- Use TopicRank importance
+- Use TF-IDF filtering
+- Keep highly important concepts only
+
+Uses:
+- spaCy
+- KeyBERT
+- YAKE
+- TF-IDF
+- TopicRank-inspired ranking
+
+Install:
+pip install spacy keybert yake scikit-learn sentence-transformers
+python -m spacy download en_core_web_md
+"""
+
 import re
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 import spacy
+import yake
 
 from keybert import KeyBERT
+
+from sklearn.feature_extraction.text import (
+    TfidfVectorizer
+)
 
 
 # =========================================================
 # LOAD MODELS
 # =========================================================
-nlp = spacy.load("en_core_web_lg")
+nlp = spacy.load("en_core_web_md")
 
 kw_model = KeyBERT(
     model="all-MiniLM-L6-v2"
+)
+
+yake_extractor = yake.KeywordExtractor(
+
+    lan="en",
+
+    n=3,
+
+    top=30
 )
 
 
@@ -31,32 +68,110 @@ def clean_text(text):
 # =========================================================
 # NORMALIZATION
 # =========================================================
-def normalize_entity(entity):
+def normalize_entity(text):
 
-    entity = entity.strip()
+    text = text.strip().lower()
 
-    # Remove extra whitespace
-    entity = re.sub(r"\s+", " ", entity)
+    text = re.sub(r"\s+", " ", text)
 
-    # Lowercase normalization
-    entity = entity.lower()
-
-    return entity
+    return text
 
 
 # =========================================================
-# SPACY ENTITY EXTRACTION
+# ENTITY FILTERING
+# =========================================================
+def is_valid_entity(text):
+
+    text = text.strip()
+
+    normalized = normalize_entity(text)
+
+    words = normalized.split()
+
+    # ---------------------------------------------
+    # Too short
+    # ---------------------------------------------
+    if len(words) == 0:
+        return False
+
+    # ---------------------------------------------
+    # Remove pure numbers
+    # ---------------------------------------------
+    if re.fullmatch(r"\d+", normalized):
+        return False
+
+    # ---------------------------------------------
+    # Remove decimals
+    # ---------------------------------------------
+    if re.fullmatch(
+        r"\d+\.\d+",
+        normalized
+    ):
+        return False
+
+    # ---------------------------------------------
+    # Remove numeric-heavy phrases
+    # ---------------------------------------------
+    digit_ratio = sum(
+        c.isdigit()
+        for c in normalized
+    ) / max(len(normalized), 1)
+
+    if digit_ratio > 0.25:
+        return False
+
+    # ---------------------------------------------
+    # Remove stopword-heavy phrases
+    # ---------------------------------------------
+    stopword_ratio = sum(
+
+        1
+
+        for word in words
+
+        if word in nlp.Defaults.stop_words
+
+    ) / len(words)
+
+    if stopword_ratio > 0.5:
+        return False
+
+    # ---------------------------------------------
+    # Remove very generic single words
+    # ---------------------------------------------
+    generic_words = {
+
+        "paper",
+        "method",
+        "methods",
+        "result",
+        "results",
+        "task",
+        "tasks",
+        "problem",
+        "problems",
+        "approach",
+        "system",
+        "model",
+        "models",
+        "data"
+    }
+
+    if (
+        len(words) == 1
+        and
+        words[0] in generic_words
+    ):
+
+        return False
+
+    return True
+
+
+# =========================================================
+# SPACY ENTITIES
 # =========================================================
 def extract_spacy_entities(text):
-
-    """
-    Extract classical entities:
-    - ORG
-    - PERSON
-    - GPE
-    - PRODUCT
-    etc.
-    """
 
     doc = nlp(text)
 
@@ -64,41 +179,40 @@ def extract_spacy_entities(text):
 
     for ent in doc.ents:
 
-        # Skip tiny/noisy entities
-        if len(ent.text.strip()) < 3:
+        entity_text = ent.text.strip()
+
+        if not is_valid_entity(
+            entity_text
+        ):
             continue
 
         entities.append({
 
-            "text": ent.text.strip(),
+            "text": entity_text,
 
             "normalized": normalize_entity(
-                ent.text
+                entity_text
             ),
 
-            "label": ent.label_,
+            "score": 0.9,
 
-            "source": "spacy"
+            "source": "spacy",
+
+            "label": ent.label_
         })
 
     return entities
 
 
 # =========================================================
-# KEYBERT EXTRACTION
+# KEYBERT
 # =========================================================
 def extract_keybert_keywords(
 
     text,
 
-    top_n=20,
-
-    min_score=0.30
+    top_n=30
 ):
-
-    """
-    Extract semantic/technical concepts.
-    """
 
     keywords = kw_model.extract_keywords(
 
@@ -111,14 +225,16 @@ def extract_keybert_keywords(
         top_n=top_n
     )
 
-    extracted = []
+    entities = []
 
     for keyword, score in keywords:
 
-        if score < min_score:
+        if not is_valid_entity(
+            keyword
+        ):
             continue
 
-        extracted.append({
+        entities.append({
 
             "text": keyword,
 
@@ -128,48 +244,194 @@ def extract_keybert_keywords(
 
             "score": float(score),
 
-            "label": "KEYPHRASE",
+            "source": "keybert",
 
-            "source": "keybert"
+            "label": "KEYPHRASE"
         })
 
-    return extracted
+    return entities
 
 
 # =========================================================
-# MERGE + DEDUPLICATE
+# YAKE
 # =========================================================
-def merge_entities(
+def extract_yake_keywords(text):
 
-    spacy_entities,
+    keywords = yake_extractor.extract_keywords(
+        text
+    )
 
-    keybert_entities
+    entities = []
+
+    for keyword, score in keywords:
+
+        if not is_valid_entity(
+            keyword
+        ):
+            continue
+
+        # YAKE:
+        # lower score = better
+        adjusted_score = (
+            1 - min(score, 1)
+        )
+
+        entities.append({
+
+            "text": keyword,
+
+            "normalized": normalize_entity(
+                keyword
+            ),
+
+            "score": adjusted_score,
+
+            "source": "yake",
+
+            "label": "YAKE"
+        })
+
+    return entities
+
+
+# =========================================================
+# TF-IDF SCORING
+# =========================================================
+def compute_tfidf_scores(
+
+    text,
+
+    entities
 ):
+
+    vectorizer = TfidfVectorizer(
+
+        stop_words="english"
+    )
+
+    vectorizer.fit([text])
+
+    vocab = vectorizer.vocabulary_
+
+    for entity in entities:
+
+        words = entity[
+            "normalized"
+        ].split()
+
+        tfidf_score = 0
+
+        for word in words:
+
+            if word in vocab:
+
+                tfidf_score += (
+                    vocab[word]
+                )
+
+        entity["tfidf_score"] = (
+            tfidf_score
+        )
+
+    return entities
+
+
+# =========================================================
+# TOPICRANK-STYLE SCORING
+# =========================================================
+def apply_topic_rank(entities):
+
+    """
+    Simple TopicRank-inspired scoring:
+    frequent entities across methods
+    become more important.
+    """
+
+    counter = Counter([
+
+        entity["normalized"]
+
+        for entity in entities
+    ])
+
+    for entity in entities:
+
+        topic_rank_score = counter[
+            entity["normalized"]
+        ]
+
+        entity["topic_rank_score"] = (
+            topic_rank_score
+        )
+
+    return entities
+
+
+# =========================================================
+# MERGE ENTITIES
+# =========================================================
+def merge_entities(entity_lists):
 
     merged = {}
 
-    # ---------------------------------------------
-    # Add spaCy entities
-    # ---------------------------------------------
-    for entity in spacy_entities:
+    for entity_group in entity_lists:
 
-        key = entity["normalized"]
+        for entity in entity_group:
 
-        merged[key] = entity
+            key = entity["normalized"]
 
-    # ---------------------------------------------
-    # Add KeyBERT entities
-    # ---------------------------------------------
-    for entity in keybert_entities:
+            if key not in merged:
 
-        key = entity["normalized"]
+                merged[key] = entity
 
-        # Prefer spaCy labels if exists
-        if key not in merged:
+            else:
 
-            merged[key] = entity
+                merged[key]["score"] = max(
+
+                    merged[key]["score"],
+
+                    entity["score"]
+                )
 
     return list(merged.values())
+
+
+# =========================================================
+# FINAL RANKING
+# =========================================================
+def rank_entities(entities):
+
+    for entity in entities:
+
+        entity["final_score"] = (
+
+            entity.get("score", 0)
+
+            +
+
+            entity.get(
+                "tfidf_score",
+                0
+            ) * 0.05
+
+            +
+
+            entity.get(
+                "topic_rank_score",
+                0
+            ) * 0.5
+        )
+
+    ranked = sorted(
+
+        entities,
+
+        key=lambda x: x["final_score"],
+
+        reverse=True
+    )
+
+    return ranked
 
 
 # =========================================================
@@ -181,10 +443,10 @@ def generate_tags(entities):
 
     for entity in entities:
 
-        normalized = entity["normalized"]
-
-        # Replace spaces with underscores
-        tag = normalized.replace(" ", "_")
+        tag = (
+            entity["normalized"]
+            .replace(" ", "_")
+        )
 
         tags.append(f"#{tag}")
 
@@ -192,9 +454,9 @@ def generate_tags(entities):
 
 
 # =========================================================
-# GROUP ENTITIES BY TYPE
+# GROUP ENTITIES
 # =========================================================
-def group_entities_by_label(entities):
+def group_entities(entities):
 
     grouped = defaultdict(list)
 
@@ -208,70 +470,94 @@ def group_entities_by_label(entities):
 
 
 # =========================================================
-# MAIN EXTRACTOR
+# MAIN FUNCTION
 # =========================================================
 def extract_metadata(
 
     text,
 
-    top_n_keywords=20
+    top_n=20
 ):
 
-    """
-    Universal extractor for:
-    - PDFs
-    - markdown
-    - transcripts
-    - notes
-    - papers
-    - books
-    """
-
-    cleaned_text = clean_text(text)
+    text = clean_text(text)
 
     # ---------------------------------------------
-    # spaCy entities
+    # Extract entities
     # ---------------------------------------------
-    spacy_entities = extract_spacy_entities(
-        cleaned_text
+    spacy_entities = (
+        extract_spacy_entities(text)
+    )
+
+    keybert_entities = (
+        extract_keybert_keywords(
+            text,
+            top_n=30
+        )
+    )
+
+    yake_entities = (
+        extract_yake_keywords(text)
     )
 
     # ---------------------------------------------
-    # KeyBERT keywords
+    # Merge
     # ---------------------------------------------
-    keybert_entities = (
-        extract_keybert_keywords(
+    merged_entities = merge_entities([
 
-            cleaned_text,
+        spacy_entities,
 
-            top_n=top_n_keywords
+        keybert_entities,
+
+        yake_entities
+    ])
+
+    # ---------------------------------------------
+    # TF-IDF scoring
+    # ---------------------------------------------
+    merged_entities = (
+        compute_tfidf_scores(
+
+            text,
+
+            merged_entities
         )
     )
 
     # ---------------------------------------------
-    # Merge entities
+    # TopicRank scoring
     # ---------------------------------------------
-    merged_entities = merge_entities(
-
-        spacy_entities,
-
-        keybert_entities
+    merged_entities = (
+        apply_topic_rank(
+            merged_entities
+        )
     )
 
     # ---------------------------------------------
-    # Generate tags
+    # Final ranking
     # ---------------------------------------------
-    tags = generate_tags(
+    ranked_entities = rank_entities(
         merged_entities
     )
 
     # ---------------------------------------------
-    # Group by label
+    # Top entities only
     # ---------------------------------------------
-    grouped_entities = (
-        group_entities_by_label(
-            merged_entities
-        )
+    ranked_entities = ranked_entities[
+        :top_n
+    ]
+
+    # ---------------------------------------------
+    # Tags
+    # ---------------------------------------------
+    tags = generate_tags(
+        ranked_entities
+    )
+
+    # ---------------------------------------------
+    # Grouping
+    # ---------------------------------------------
+    grouped = group_entities(
+        ranked_entities
     )
 
     # =====================================================
@@ -279,13 +565,9 @@ def extract_metadata(
     # =====================================================
     return {
 
-        "entities": merged_entities,
+        "entities": ranked_entities,
 
-        "grouped_entities": grouped_entities,
+        "grouped_entities": grouped,
 
-        "tags": tags,
-
-        "entity_count": len(
-            merged_entities
-        )
+        "tags": tags
     }
