@@ -1,0 +1,13 @@
+chromadb
+tiktoken
+openai
+sentence-transformers
+spacy
+neo4j
+networkx
+faiss-cpu
+pymupdf
+scikit-learn
+markdown-it-py
+ipykernel
+keybert
