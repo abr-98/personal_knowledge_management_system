@@ -2,6 +2,7 @@ import uuid
 import tiktoken
 from entity_handlers.entity_extractor import extract_metadata
 from entity_handlers.relationship_extractor_auto import extract_relationships
+from entity_handlers.clean_entites import canonicalize_entities
 
 
 # =========================================================
@@ -67,6 +68,10 @@ def fixed_size_chunker(
         chunk_tokens = tokens[start:end]
 
         chunk_text = tokenizer.decode(chunk_tokens)
+        
+        entities = extract_metadata(chunk_text)["entities"]
+        
+        entities_cleaned  = canonicalize_entities([e["text"] for e in entities])
 
         chunks.append({
 
@@ -74,7 +79,7 @@ def fixed_size_chunker(
 
             "text": chunk_text,
             
-            "entities": extract_metadata(chunk_text)["entities"],
+            "entities": entities_cleaned,
 
             "start_token": start,
             "end_token": end,
@@ -122,7 +127,7 @@ def chunk_file(
         if len(chunk) > 0:
             relationships = extract_relationships(
                 chunk["text"],
-                [i["text"] for i in chunk["entities"]])
+                chunk["entities"])
             chunk["relationships"] = relationships
 
     # Add source metadata

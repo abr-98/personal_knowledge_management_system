@@ -6,6 +6,7 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from entity_handlers.entity_extractor import extract_metadata
 from entity_handlers.relationship_extractor_auto import extract_relationships
+from entity_handlers.clean_entites import canonicalize_entities
 
 
 # =========================================================
@@ -351,6 +352,10 @@ def semantic_pdf_chunking(pdf_path):
     all_chunks = []
 
     for idx, chunk in enumerate(chunks):
+        
+        entities = extract_metadata(chunk)["entities"]
+        
+        entities_cleaned  = canonicalize_entities([e["text"] for e in entities])
 
         all_chunks.append({
 
@@ -358,7 +363,7 @@ def semantic_pdf_chunking(pdf_path):
 
             "text": chunk,
             
-            "entities": extract_metadata(chunk)["entities"],
+            "entities": entities_cleaned,
 
             "source": pdf_path,
 
@@ -383,7 +388,7 @@ def semantic_pdf_chunking(pdf_path):
         if len(chunk) > 0:
             relationships = extract_relationships(
                 chunk["text"],
-                [i["text"] for i in chunk["entities"]])
+                chunk["entities"])
             chunk["relationships"] = relationships
 
     return all_chunks

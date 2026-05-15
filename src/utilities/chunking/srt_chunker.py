@@ -5,6 +5,7 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from entity_handlers.entity_extractor import extract_metadata
 from entity_handlers.relationship_extractor_auto import extract_relationships
+from entity_handlers.clean_entites import canonicalize_entities
 
 
 # =========================================================
@@ -184,6 +185,10 @@ def chunk_srt_transcript(
         # Child chunks
         # -----------------------------------------
         for child_idx, entry in enumerate(chunk_entries):
+            
+            entities = extract_metadata(entry)["entities"]
+        
+            entities_cleaned  = canonicalize_entities([e["text"] for e in entities])
 
             final_chunks.append({
 
@@ -208,7 +213,7 @@ def chunk_srt_transcript(
 
                 # Retrieval text
                 "text": entry["text"],
-                "entities": extract_metadata(entry["text"])["entities"],
+                "entities": entities_cleaned,
 
                 # Parent conversational context
                 "parent_context": parent_text,
@@ -225,7 +230,7 @@ def chunk_srt_transcript(
         if len(chunk) > 0:
             relationships = extract_relationships(
                 chunk["text"],
-                [i["text"] for i in chunk["entities"]])
+                chunk["entities"])
             chunk["relationships"] = relationships      
     
 

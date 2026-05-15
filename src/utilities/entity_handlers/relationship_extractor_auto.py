@@ -1,26 +1,63 @@
 """
-Relationship Extraction for PKMS / Graph RAG
---------------------------------------------
+Improved Relationship Extraction
+--------------------------------
 Features:
-- Entity co-occurrence relationships
-- spaCy dependency relationships
+- Co-occurrence relationships
+- Dependency relationships
+- Semantic scoring
+- Weak entity filtering
+- Relationship pruning
 - Graph-ready triples
-- Chunk-aware relationship extraction
-- Confidence scoring
 
 Install:
-pip install spacy
+pip install spacy sentence-transformers scikit-learn
 python -m spacy download en_core_web_md
 """
 
 import itertools
 import spacy
 
+from collections import defaultdict
+
+from sentence_transformers import (
+    SentenceTransformer
+)
+
+from sklearn.metrics.pairwise import (
+    cosine_similarity
+)
+
 
 # =========================================================
-# LOAD MODEL
+# LOAD MODELS
 # =========================================================
 nlp = spacy.load("en_core_web_md")
+
+embedding_model = SentenceTransformer(
+    "all-MiniLM-L6-v2"
+)
+
+
+# =========================================================
+# GENERIC LOW-INFORMATION ENTITIES
+# =========================================================
+GENERIC_ENTITIES = {
+
+    "paper",
+    "work",
+    "time",
+    "table",
+    "figure",
+    "quality",
+    "permission",
+    "result",
+    "method",
+    "model",
+    "task",
+    "approach",
+    "problem",
+    "system"
+}
 
 
 # =========================================================
@@ -36,6 +73,126 @@ def normalize_entity(text):
 
 
 # =========================================================
+# ENTITY VALIDATION
+# =========================================================
+def is_valid_entity(entity):
+
+    entity = normalize_entity(
+        entity
+    )
+
+    # ---------------------------------------------
+    # Empty
+    # ---------------------------------------------
+    if not entity:
+        return False
+
+    # ---------------------------------------------
+    # Tiny entities
+    # ---------------------------------------------
+    if len(entity) < 3:
+        return False
+
+    # ---------------------------------------------
+    # Generic entities
+    # ---------------------------------------------
+    if entity in GENERIC_ENTITIES:
+        return False
+
+    # ---------------------------------------------
+    # Numeric
+    # ---------------------------------------------
+    if entity.isdigit():
+        return False
+
+    return True
+
+
+# =========================================================
+# SEMANTIC SIMILARITY
+# =========================================================
+def semantic_similarity(
+
+    source,
+
+    target
+):
+
+    embeddings = embedding_model.encode([
+
+        source,
+        target
+    ])
+
+    similarity = cosine_similarity(
+
+        [embeddings[0]],
+
+        [embeddings[1]]
+    )[0][0]
+
+    return float(similarity)
+
+
+# =========================================================
+# RELATIONSHIP SCORE
+# =========================================================
+def compute_relationship_score(
+
+    relationship,
+
+    entity_frequency
+):
+
+    source = relationship["source"]
+
+    target = relationship["target"]
+
+    base_confidence = (
+        relationship["confidence"]
+    )
+
+    similarity = semantic_similarity(
+
+        source,
+
+        target
+    )
+
+    source_freq = entity_frequency.get(
+        source,
+        1
+    )
+
+    target_freq = entity_frequency.get(
+        target,
+        1
+    )
+
+    # ---------------------------------------------
+    # Final weighted score
+    # ---------------------------------------------
+    score = (
+
+        base_confidence
+
+        +
+
+        similarity
+
+        +
+
+        (0.1 * source_freq)
+
+        +
+
+        (0.1 * target_freq)
+    )
+
+    return round(score, 4)
+
+
+# =========================================================
 # CO-OCCURRENCE RELATIONSHIPS
 # =========================================================
 def create_cooccurrence_relationships(
@@ -45,21 +202,21 @@ def create_cooccurrence_relationships(
     chunk_id=None
 ):
 
-    """
-    Creates weak graph edges based on
-    entity co-occurrence inside a chunk.
-    """
-
     relationships = []
 
     unique_entities = list(set([
+
         normalize_entity(e)
+
         for e in entities
+
+        if is_valid_entity(e)
     ]))
 
-    # Create all pair combinations
     for source, target in itertools.combinations(
+
         unique_entities,
+
         2
     ):
 
@@ -71,7 +228,7 @@ def create_cooccurrence_relationships(
 
             "target": target,
 
-            "confidence": 0.5,
+            "confidence": 0.45,
 
             "method": "cooccurrence",
 
@@ -88,6 +245,8 @@ def create_dependency_relationships(
 
     text,
 
+    entities,
+
     chunk_id=None
 ):
 
@@ -95,17 +254,28 @@ def create_dependency_relationships(
     Extracts:
         subject -> verb -> object
 
-    Example:
-        Transformer uses attention
+    ONLY between valid entities.
     """
 
     doc = nlp(text)
 
     relationships = []
 
+    # ---------------------------------------------
+    # Valid entity set
+    # ---------------------------------------------
+    valid_entities = set([
+
+        normalize_entity(e)
+
+        for e in entities
+    ])
+
     for token in doc:
 
-        # Look for verbs
+        # -----------------------------------------
+        # Only verbs
+        # ---------------------------------------------
         if token.pos_ != "VERB":
             continue
 
@@ -113,8 +283,8 @@ def create_dependency_relationships(
         obj = None
 
         # -----------------------------------------
-        # Find subject
-        # -----------------------------------------
+        # Find subject/object
+        # ---------------------------------------------
         for child in token.children:
 
             if child.dep_ in (
@@ -122,48 +292,59 @@ def create_dependency_relationships(
                 "nsubjpass"
             ):
 
-                subject = child.text
+                subject = normalize_entity(
+                    child.text
+                )
 
-            # -------------------------------------
-            # Find object
-            # -------------------------------------
             if child.dep_ in (
                 "dobj",
                 "pobj",
                 "attr"
             ):
 
-                obj = child.text
+                obj = normalize_entity(
+                    child.text
+                )
+
+        # -----------------------------------------
+        # Must exist
+        # ---------------------------------------------
+        if not subject or not obj:
+            continue
+
+        # -----------------------------------------
+        # MUST be canonical entities
+        # ---------------------------------------------
+        if (
+            subject not in valid_entities
+            or
+            obj not in valid_entities
+        ):
+
+            continue
 
         # -----------------------------------------
         # Create relationship
-        # -----------------------------------------
-        if subject and obj:
+        # ---------------------------------------------
+        relationships.append({
 
-            relationships.append({
+            "source": subject,
 
-                "source": normalize_entity(
-                    subject
-                ),
+            "relation": token.lemma_.upper(),
 
-                "relation": token.lemma_.upper(),
+            "target": obj,
 
-                "target": normalize_entity(
-                    obj
-                ),
+            "confidence": 0.9,
 
-                "confidence": 0.85,
+            "method": "dependency_parse",
 
-                "method": "dependency_parse",
-
-                "chunk_id": chunk_id
-            })
+            "chunk_id": chunk_id
+        })
 
     return relationships
 
-
 # =========================================================
-# DEDUPLICATE RELATIONSHIPS
+# DEDUPLICATE
 # =========================================================
 def deduplicate_relationships(
     relationships
@@ -174,17 +355,20 @@ def deduplicate_relationships(
     for rel in relationships:
 
         key = (
+
             rel["source"],
+
             rel["relation"],
+
             rel["target"]
         )
 
-        # Keep highest confidence
+        # Keep strongest
         if (
             key not in unique
             or
-            rel["confidence"]
-            > unique[key]["confidence"]
+            rel["score"]
+            > unique[key]["score"]
         ):
 
             unique[key] = rel
@@ -193,7 +377,43 @@ def deduplicate_relationships(
 
 
 # =========================================================
-# MAIN RELATIONSHIP EXTRACTOR
+# FILTER RELATIONSHIPS
+# =========================================================
+def filter_relationships(
+
+    relationships,
+
+    min_score=1.2
+):
+
+    filtered = []
+
+    for rel in relationships:
+
+        # -----------------------------------------
+        # Remove self loops
+        # -----------------------------------------
+        if (
+            rel["source"]
+            ==
+            rel["target"]
+        ):
+
+            continue
+
+        # -----------------------------------------
+        # Remove weak relationships
+        # -----------------------------------------
+        if rel["score"] < min_score:
+            continue
+
+        filtered.append(rel)
+
+    return filtered
+
+
+# =========================================================
+# MAIN EXTRACTOR
 # =========================================================
 def extract_relationships(
 
@@ -204,16 +424,26 @@ def extract_relationships(
     chunk_id=None
 ):
 
-    """
-    Hybrid relationship extraction:
-    - co-occurrence
-    - dependency parsing
-    """
+    # ---------------------------------------------
+    # Entity frequency
+    # ---------------------------------------------
+    entity_frequency = defaultdict(int)
+
+    for entity in entities:
+
+        entity = normalize_entity(
+            entity
+        )
+
+        entity_frequency[
+            entity
+        ] += 1
 
     # ---------------------------------------------
-    # Weak graph edges
+    # Co-occurrence
     # ---------------------------------------------
     cooccurrence_relationships = (
+
         create_cooccurrence_relationships(
 
             entities,
@@ -223,12 +453,15 @@ def extract_relationships(
     )
 
     # ---------------------------------------------
-    # Strong semantic edges
+    # Dependency relationships
     # ---------------------------------------------
     dependency_relationships = (
+
         create_dependency_relationships(
 
             text,
+            
+            entities,
 
             chunk_id=chunk_id
         )
@@ -247,76 +480,48 @@ def extract_relationships(
     )
 
     # ---------------------------------------------
-    # Deduplicate
+    # Add semantic score
     # ---------------------------------------------
-    final_relationships = (
-        deduplicate_relationships(
+    for rel in all_relationships:
+
+        rel["score"] = (
+            compute_relationship_score(
+
+                rel,
+
+                entity_frequency
+            )
+        )
+
+    # ---------------------------------------------
+    # Filter
+    # ---------------------------------------------
+    filtered_relationships = (
+        filter_relationships(
             all_relationships
         )
     )
 
-    return final_relationships
+    # ---------------------------------------------
+    # Deduplicate
+    # ---------------------------------------------
+    final_relationships = (
+        deduplicate_relationships(
 
-
-# =========================================================
-# EXAMPLE USAGE
-# =========================================================
-if __name__ == "__main__":
-
-    chunk_text = """
-    Transformers use self-attention
-    mechanisms to improve sequence
-    modeling.
-
-    PyTorch is commonly used for
-    training Transformer models.
-
-    Neo4j can be used for Graph RAG.
-    """
-
-    entities = [
-
-        "Transformers",
-
-        "Self-Attention",
-
-        "Sequence Modeling",
-
-        "PyTorch",
-
-        "Neo4j",
-
-        "Graph RAG"
-    ]
-
-    relationships = extract_relationships(
-
-        text=chunk_text,
-
-        entities=entities,
-
-        chunk_id="chunk_001"
+            filtered_relationships
+        )
     )
 
-    print("\n" + "=" * 80)
+    # ---------------------------------------------
+    # Sort strongest first
+    # ---------------------------------------------
+    final_relationships = sorted(
 
-    print("\nRELATIONSHIPS:\n")
+        final_relationships,
 
-    for rel in relationships:
+        key=lambda x: x["score"],
 
-        print(
-            f"{rel['source']} "
-            f"--{rel['relation']}--> "
-            f"{rel['target']}"
-        )
+        reverse=True
+    )
 
-        print(
-            f"Method: {rel['method']}"
-        )
-
-        print(
-            f"Confidence: "
-            f"{rel['confidence']}"
-        )
-
-        print()
+    return final_relationships

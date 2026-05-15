@@ -8,6 +8,7 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from entity_handlers.entity_extractor_markdown import extract_markdown_entities
 from entity_handlers.relationship_extractor_auto import extract_relationships
+from entity_handlers.clean_entites import canonicalize_entities
 
 
 # =========================================================
@@ -204,6 +205,10 @@ def chunk_markdown_note(
         for child_idx, chunk_text in enumerate(semantic_chunks):
 
             chunk_id = str(uuid.uuid4())
+            
+            entities = extract_markdown_entities(chunk)["entities"]
+        
+            entities_cleaned  = canonicalize_entities(entities)
 
             final_chunks.append({
 
@@ -220,7 +225,7 @@ def chunk_markdown_note(
 
                 # Text
                 "text": chunk_text,
-                "entities": extract_markdown_entities(chunk_text)["entities"],
+                "entities": entities_cleaned,
                 "parent_text": parent_text,
 
                 # Graph metadata

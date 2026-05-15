@@ -222,3 +222,7 @@ venv/
 __pycache__/
 .ipynb_checkpoints/
 OpenAI-key.txt
+
+neo4j_settings.json
+
+pkms_db/
