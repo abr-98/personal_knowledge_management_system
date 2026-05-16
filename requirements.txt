@@ -12,3 +12,4 @@ markdown-it-py
 ipykernel
 keybert
 yake
+rank-bm25
