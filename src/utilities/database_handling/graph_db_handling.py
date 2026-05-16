@@ -1,12 +1,23 @@
 """
-Neo4j Aura Graph Store
-----------------------
+Neo4j Aura Semantic Graph Store
+--------------------------------
+Architecture:
+
+(Domain)
+    ↓
+(Topic)
+    ↓
+(Entity)
+
 Features:
-- Adds entities as nodes
-- Adds relationships as edges
-- Stores originating chunk text
-- Stores source + chunk_id on nodes
-- Uses MERGE to avoid duplicates
+- Domain nodes
+- Topic nodes
+- Entity nodes
+- Entity embeddings
+- Entity descriptions
+- Subdomain metadata
+- Relationship edges
+- Merge-ready entity structure
 
 Install:
 pip install neo4j
@@ -25,14 +36,18 @@ class GraphStore:
 
         self,
 
-        uri,
+        uri=None,
 
-        username,
+        username=None,
 
-        password
+        password=None
     ):
-        
-        with open("neo4j_settings.json", "r") as f:
+
+        with open(
+            "neo4j_settings.json",
+            "r"
+        ) as f:
+
             settings = json.load(f)
 
         self.driver = (
@@ -41,8 +56,14 @@ class GraphStore:
                 settings["NEO4J_URI"],
 
                 auth=(
-                    settings["NEO4J_USERNAME"],
-                    settings["NEO4J_PASSWORD"]
+
+                    settings[
+                        "NEO4J_USERNAME"
+                    ],
+
+                    settings[
+                        "NEO4J_PASSWORD"
+                    ]
                 )
             )
         )
@@ -55,7 +76,67 @@ class GraphStore:
         self.driver.close()
 
     # =====================================================
-    # ADD ENTITY NODE
+    # ADD DOMAIN
+    # =====================================================
+    def add_domain(
+
+        self,
+
+        tx,
+
+        domain
+    ):
+
+        query = """
+        MERGE (d:Domain {
+            name: $domain
+        })
+        """
+
+        tx.run(
+
+            query,
+
+            domain=domain
+        )
+
+    # =====================================================
+    # ADD TOPIC
+    # =====================================================
+    def add_topic(
+
+        self,
+
+        tx,
+
+        topic,
+
+        domain
+    ):
+
+        query = """
+        MERGE (t:Topic {
+            name: $topic
+        })
+
+        MERGE (d:Domain {
+            name: $domain
+        })
+
+        MERGE (t)-[:IN_DOMAIN]->(d)
+        """
+
+        tx.run(
+
+            query,
+
+            topic=topic,
+
+            domain=domain
+        )
+
+    # =====================================================
+    # ADD ENTITY
     # =====================================================
     def add_entity(
 
@@ -65,34 +146,58 @@ class GraphStore:
 
         entity_name,
 
+        topic,
+
+        domain,
+
+        subdomain,
+
+        description,
+
         text,
 
-        source_file,
+        embedding,
 
-        chunk_id
+        source_file
     ):
 
         query = """
         MERGE (e:Entity {
-            name: $name
+            name: $entity_name,
+            subdomain: $subdomain
         })
 
-        SET e.text = $text,
-            e.source = $source_file,
-            e.chunk_id = $chunk_id
+        SET e.description = $description,
+            e.text = $text,
+            e.embedding = $embedding,
+            e.source = $source_file
+
+        MERGE (t:Topic {
+            name: $topic
+        })
+
+        MERGE (e)-[:HAS_TOPIC]->(t)
         """
 
         tx.run(
 
             query,
 
-            name=entity_name,
+            entity_name=entity_name,
+
+            topic=topic,
+
+            domain=domain,
+
+            subdomain=subdomain,
+
+            description=description,
 
             text=text,
 
-            source_file=source_file,
+            embedding=embedding,
 
-            chunk_id=chunk_id
+            source_file=source_file
         )
 
     # =====================================================
@@ -106,15 +211,11 @@ class GraphStore:
 
         source,
 
-        relation,
-
         target,
 
-        chunk_id,
+        relation,
 
-        source_file,
-
-        text
+        score=None
     ):
 
         query = f"""
@@ -128,9 +229,7 @@ class GraphStore:
 
         MERGE (a)-[r:{relation}]->(b)
 
-        SET r.chunk_id = $chunk_id,
-            r.source = $source_file,
-            r.text = $text
+        SET r.score = $score
         """
 
         tx.run(
@@ -141,17 +240,64 @@ class GraphStore:
 
             target=target,
 
-            chunk_id=chunk_id,
-
-            source_file=source_file,
-
-            text=text
+            score=score
         )
 
-    # =====================================================
+        # =====================================================
     # ADD DOCUMENT
     # =====================================================
-    def add_document(self, item):
+    def add_document(
+        self,
+        item
+    ):
+
+        # =================================================
+        # META DETAILS
+        # =================================================
+        meta_details = item.get(
+            "meta_details",
+            {}
+        )
+
+        domain = meta_details.get(
+            "domain",
+            "Unknown"
+        )
+
+        subdomain = meta_details.get(
+            "subdomain",
+            "Unknown"
+        )
+
+        topics = meta_details.get(
+            "topics",
+            []
+        )
+
+        summary = meta_details.get(
+            "summary",
+            ""
+        )
+
+        # =================================================
+        # DOCUMENT DETAILS
+        # =================================================
+        text = item.get(
+            "text",
+            ""
+        )
+
+        source_file = item.get(
+            "source",
+            ""
+        )
+
+        cluster_id = str(
+            item.get(
+                "cluster_id",
+                ""
+            )
+        )
 
         entities = item.get(
             "entities",
@@ -163,141 +309,190 @@ class GraphStore:
             []
         )
 
-        chunk_id = item.get(
-            "chunk_id"
-        )
-
-        source_file = item.get(
-            "source"
-        )
-
-        text = item.get(
-            "text"
-        )
-
+        # =================================================
+        # SESSION
+        # =================================================
         with self.driver.session() as session:
 
-            # -----------------------------------------
-            # Add entity nodes
-            # -----------------------------------------
+            # =============================================
+            # DOMAIN
+            # =============================================
+            session.execute_write(
+
+                self.add_domain,
+
+                domain
+            )
+
+            # =============================================
+            # TOPICS
+            # =============================================
+            for topic in topics:
+
+                session.execute_write(
+
+                    self.add_topic,
+
+                    topic,
+
+                    domain
+                )
+
+            # =============================================
+            # ENTITIES
+            # =============================================
             for entity in entities:
 
-                # Dict entity
-                if isinstance(entity, dict):
-
-                    entity_name = entity.get(
-                        "text",
-                        ""
-                    )
-
-                # String entity
-                else:
-
-                    entity_name = entity
+                # -----------------------------------------
+                # Entity name
+                # -----------------------------------------
+                entity_name = str(
+                    entity
+                ).strip()
 
                 if not entity_name:
                     continue
 
-                session.write_transaction(
+                # -----------------------------------------
+                # Entity description
+                # -----------------------------------------
+                description = f"""
+                Entity:
+                {entity_name}
+
+                Summary:
+                {summary}
+
+                Topics:
+                {", ".join(topics)}
+
+                Context:
+                {text[:3000]}
+                """
+
+                # -----------------------------------------
+                # Embedding placeholder
+                # -----------------------------------------
+                embedding = []
+
+                # -----------------------------------------
+                # Topic routing
+                # -----------------------------------------
+                topic = (
+
+                    topics[0]
+
+                    if topics
+
+                    else "General"
+                )
+
+                # -----------------------------------------
+                # Add entity
+                # -----------------------------------------
+                session.execute_write(
 
                     self.add_entity,
 
                     entity_name,
 
+                    topic,
+
+                    domain,
+
+                    subdomain,
+
+                    description,
+
                     text,
 
-                    source_file,
+                    embedding,
 
-                    chunk_id
+                    source_file
                 )
 
-            # -----------------------------------------
-            # Add relationships
-            # -----------------------------------------
+            # =============================================
+            # RELATIONSHIPS
+            # =============================================
             for rel in relationships:
 
-                # Dict relationship
-                if isinstance(rel, dict):
+                source = rel.get(
+                    "source",
+                    ""
+                )
 
-                    source = rel.get(
-                        "source",
-                        ""
+                target = rel.get(
+                    "target",
+                    ""
+                )
+
+                relation = rel.get(
+                    "relation",
+                    "RELATED_TO"
+                )
+
+                score = rel.get(
+                    "score",
+                    rel.get(
+                        "weight",
+                        1
                     )
-
-                    relation = rel.get(
-                        "relation",
-                        "RELATED_TO"
-                    )
-
-                    target = rel.get(
-                        "target",
-                        ""
-                    )
-
-                # Tuple relationship
-                elif (
-                    isinstance(
-                        rel,
-                        (list, tuple)
-                    )
-                    and
-                    len(rel) == 3
-                ):
-
-                    source = rel[0]
-
-                    relation = rel[1]
-
-                    target = rel[2]
-
-                else:
-
-                    continue
+                )
 
                 if (
                     not source
                     or
                     not target
                 ):
-
                     continue
 
-                # Neo4j relationship format
+                # -----------------------------------------
+                # Neo4j-safe relation
+                # -----------------------------------------
                 relation = (
+
                     relation.upper()
+
                     .replace(" ", "_")
+
+                    .replace("-", "_")
                 )
 
-                session.write_transaction(
+                # -----------------------------------------
+                # Add relationship
+                # -----------------------------------------
+                session.execute_write(
 
                     self.add_relationship,
 
                     source,
 
-                    relation,
-
                     target,
 
-                    chunk_id,
+                    relation,
 
-                    source_file,
-
-                    text
+                    score
                 )
 
     # =====================================================
     # ADD MULTIPLE DOCUMENTS
     # =====================================================
-    def add_documents(self, items):
+    def add_documents(
+        self,
+        items
+    ):
 
         for item in items:
 
             self.add_document(item)
 
     # =====================================================
-    # CYPHER QUERY
+    # QUERY
     # =====================================================
-    def query(self, cypher_query):
+    def query(
+        self,
+        cypher_query
+    ):
 
         with self.driver.session() as session:
 
@@ -310,87 +505,5 @@ class GraphStore:
                 record.data()
 
                 for record in result
+                
             ]
-
-
-# =========================================================
-# EXAMPLE
-# =========================================================
-if __name__ == "__main__":
-
-    URI = (
-        "neo4j+s://f1d9637d.databases.neo4j.io"
-    )
-
-    USERNAME = "neo4j"
-
-    PASSWORD = "YOUR_PASSWORD"
-
-    graph_store = GraphStore(
-
-        uri=URI,
-
-        username=USERNAME,
-
-        password=PASSWORD
-    )
-
-    item = {
-
-        "chunk_id": "chunk_001",
-
-        "source": "notes.md",
-
-        "text": """
-        Transformers use self-attention
-        mechanisms.
-        """,
-
-        "entities": [
-
-            "Transformers",
-
-            "Self-Attention",
-
-            "PyTorch"
-        ],
-
-        "relationships": [
-
-            {
-                "source": "Transformers",
-
-                "relation": "USES",
-
-                "target": "Self-Attention"
-            },
-
-            (
-                "PyTorch",
-                "TRAINS",
-                "Transformers"
-            )
-        ]
-    }
-
-    # ---------------------------------------------
-    # Add to graph
-    # ---------------------------------------------
-    graph_store.add_document(item)
-
-    # ---------------------------------------------
-    # Query
-    # ---------------------------------------------
-    results = graph_store.query("""
-
-    MATCH (e:Entity)
-
-    RETURN e
-
-    LIMIT 5
-
-    """)
-
-    print(results)
-
-    graph_store.close()
