@@ -381,13 +381,23 @@ class SemanticGraphRetriever:
                 name: $entity_name
             }}
 
-        )-[*1..{depth}]-(related)
+        )-[*1..{depth}]-(related:Entity)
+
+        OPTIONAL MATCH
+        (related)-[:HAS_TOPIC]->(t:Topic)
 
         RETURN DISTINCT
+
             related.name AS entity,
-            related.description
-                AS description,
-            related.text AS text
+
+            related.description AS description,
+
+            related.text AS text,
+
+            related.source AS source,
+
+            collect(DISTINCT t.name)
+                AS topics
         """
 
         with self.driver.session() as session:
