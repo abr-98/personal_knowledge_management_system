@@ -13,3 +13,4 @@ ipykernel
 keybert
 yake
 rank-bm25
+psycopg2-binary
