@@ -11,30 +11,50 @@ def get_connection():
     )
 
 
-def get_records_by_tags(
+def search_records(
     user_id: str,
-    tags: list[str]
+    tags: list[str] | None = None,
+    topics: list[str] | None = None,
+    domain: str | None = None
 ):
     conn = get_connection()
 
     try:
         cur = conn.cursor()
 
-        cur.execute("""
+        query = """
             SELECT
                 id,
                 link_or_path,
                 source,
+                domain,
                 tags,
+                topics,
                 created_at
             FROM records
             WHERE user_id = %s
-            AND tags && %s
-            ORDER BY created_at DESC
-        """, (
-            user_id,
-            tags
-        ))
+        """
+
+        params = [user_id]
+
+        # Optional tag filtering
+        if tags:
+            query += " AND tags && %s"
+            params.append(tags)
+
+        # Optional topic filtering
+        if topics:
+            query += " AND topics && %s"
+            params.append(topics)
+
+        # Optional domain filtering
+        if domain:
+            query += " AND domain = %s"
+            params.append(domain)
+
+        query += " ORDER BY created_at DESC"
+
+        cur.execute(query, tuple(params))
 
         rows = cur.fetchall()
 
@@ -45,8 +65,10 @@ def get_records_by_tags(
                 "id": row[0],
                 "link_or_path": row[1],
                 "source": row[2],
-                "tags": row[3],
-                "created_at": row[4]
+                "domain": row[3],
+                "tags": row[4],
+                "topics": row[5],
+                "created_at": row[6]
             })
 
         return results
@@ -58,14 +80,3 @@ def get_records_by_tags(
     finally:
         cur.close()
         conn.close()
-
-
-# Example usage
-
-results = get_records_by_tags(
-    user_id="user_123",
-    tags=["AI", "GraphRAG"]
-)
-
-for record in results:
-    print(record["link_or_path"])
