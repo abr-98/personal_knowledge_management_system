@@ -1,6 +1,6 @@
 import psycopg2
 
-def create():
+def create_records_table():
     conn = psycopg2.connect(host="localhost",
                             database= "Pkms_db",
                             user="postgres",
@@ -19,7 +19,9 @@ def create():
                             link_or_path TEXT NOT NULL,
                             created_at TIMESTAMPTZ DEFAULT NOW(),
                             source VARCHAR(255),
-                            tags TEXT[]
+                            tags TEXT[],
+                            domain VARCHAR(255),
+                            topics TEXT[]
                         )
                     """)
         conn.commit()
