@@ -18,6 +18,8 @@ def create_self_notes_table():
             CREATE TABLE IF NOT EXISTS notes (
                 id SERIAL PRIMARY KEY,
 
+                user_id VARCHAR(255) NOT NULL,
+
 
                 title TEXT NOT NULL,
 
@@ -45,6 +47,27 @@ def create_self_notes_table():
             CREATE INDEX IF NOT EXISTS notes_search_idx
             ON notes
             USING GIN(search_vector);
+        """)
+
+        cur.execute("""
+            ALTER TABLE notes
+            ADD COLUMN IF NOT EXISTS user_id VARCHAR(255);
+        """)
+
+        cur.execute("""
+            UPDATE notes
+            SET user_id = COALESCE(user_id, 'default')
+            WHERE user_id IS NULL;
+        """)
+
+        cur.execute("""
+            ALTER TABLE notes
+            ALTER COLUMN user_id SET NOT NULL;
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_notes_user_id
+            ON notes(user_id);
         """)
         
         conn.commit()

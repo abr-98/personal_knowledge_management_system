@@ -1,15 +1,25 @@
+from __future__ import annotations
+
+import os
+
 from openai import OpenAI
 
 
-# =========================================================
-# OPENAI CLIENT
-# =========================================================
+def _load_api_key() -> str:
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if api_key:
+        return api_key
 
-with open("OpenAI-Key.txt", "r") as f:
-    api_key = f.read().strip()
-client = OpenAI(
-    api_key=api_key
-)
+    key_path = "OpenAI-Key.txt"
+    if os.path.exists(key_path):
+        with open(key_path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+
+    raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY or create OpenAI-Key.txt.")
+
+
+def _get_client() -> OpenAI:
+    return OpenAI(api_key=_load_api_key())
 
 
 # =========================================================
@@ -274,7 +284,7 @@ def generate_answer(
     # =====================================================
     # LLM CALL
     # =====================================================
-    response = client.chat.completions.create(
+    response = _get_client().chat.completions.create(
 
         model=model,
 

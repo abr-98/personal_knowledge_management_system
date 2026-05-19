@@ -1,18 +1,14 @@
-import psycopg2
+from __future__ import annotations
+
+from src.infrastructure.database import DatabaseSettings, get_connection, load_database_settings
 
 
-def get_connection():
-    return psycopg2.connect(
-        host="localhost",
-        database="Pkms_db",
-        user="postgres",
-        password="1234",
-        port="5432"
-    )
+def _get_connection(settings: DatabaseSettings | None = None):
+    return get_connection(settings or load_database_settings())
 
 
-def fetch_user_records(user_id: str):
-    conn = get_connection()
+def fetch_user_records(user_id: str, settings: DatabaseSettings | None = None):
+    conn = _get_connection(settings)
 
     try:
         cur = conn.cursor()
@@ -60,9 +56,10 @@ def fetch_user_records(user_id: str):
 def update_tags(
     record_id: int,
     user_id: str,
-    new_tags: list[str]
+    new_tags: list[str],
+    settings: DatabaseSettings | None = None,
 ):
-    conn = get_connection()
+    conn = _get_connection(settings)
 
     try:
         cur = conn.cursor()
@@ -83,14 +80,11 @@ def update_tags(
 
         conn.commit()
 
-        if updated:
-            print(f"Updated tags for record ID: {updated[0]}")
-        else:
-            print("No matching record found")
+        return updated is not None
 
     except Exception as e:
         conn.rollback()
-        print("Error:", e)
+        raise e
 
     finally:
         cur.close()
@@ -100,9 +94,10 @@ def update_tags(
 def update_topics(
     record_id: int,
     user_id: str,
-    new_topics: list[str]
+    new_topics: list[str],
+    settings: DatabaseSettings | None = None,
 ):
-    conn = get_connection()
+    conn = _get_connection(settings)
 
     try:
         cur = conn.cursor()
@@ -123,14 +118,11 @@ def update_topics(
 
         conn.commit()
 
-        if updated:
-            print(f"Updated topics for record ID: {updated[0]}")
-        else:
-            print("No matching record found")
+        return updated is not None
 
     except Exception as e:
         conn.rollback()
-        print("Error:", e)
+        raise e
 
     finally:
         cur.close()
@@ -139,9 +131,10 @@ def update_topics(
 
 def get_records_by_tags(
     user_id: str,
-    tags: list[str]
+    tags: list[str],
+    settings: DatabaseSettings | None = None,
 ):
-    conn = get_connection()
+    conn = _get_connection(settings)
 
     try:
         cur = conn.cursor()
@@ -182,8 +175,7 @@ def get_records_by_tags(
         return results
 
     except Exception as e:
-        print("Error:", e)
-        return []
+        raise e
 
     finally:
         cur.close()

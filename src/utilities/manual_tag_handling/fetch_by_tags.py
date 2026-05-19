@@ -1,23 +1,20 @@
-import psycopg2
+from __future__ import annotations
+
+from src.infrastructure.database import DatabaseSettings, get_connection, load_database_settings
 
 
-def get_connection():
-    return psycopg2.connect(
-        host="localhost",
-        port=5432,
-        dbname="your_database",
-        user="your_username",
-        password="your_password"
-    )
+def _get_connection(settings: DatabaseSettings | None = None):
+    return get_connection(settings or load_database_settings())
 
 
 def search_records(
     user_id: str,
     tags: list[str] | None = None,
     topics: list[str] | None = None,
-    domain: str | None = None
+    domain: str | None = None,
+    settings: DatabaseSettings | None = None,
 ):
-    conn = get_connection()
+    conn = _get_connection(settings)
 
     try:
         cur = conn.cursor()
@@ -74,8 +71,7 @@ def search_records(
         return results
 
     except Exception as e:
-        print("Error:", e)
-        return []
+        raise e
 
     finally:
         cur.close()

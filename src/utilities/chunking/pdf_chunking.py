@@ -4,9 +4,9 @@ import uuid
 
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-from entity_handlers.entity_extractor import extract_metadata
-from entity_handlers.relationship_extractor_auto import extract_relationships
-from entity_handlers.clean_entites import canonicalize_entities
+from src.utilities.entity_handlers.entity_extractor import extract_metadata
+from src.utilities.entity_handlers.relationship_extractor_auto import extract_relationships
+from src.utilities.entity_handlers.clean_entites import canonicalize_entities
 
 
 # =========================================================

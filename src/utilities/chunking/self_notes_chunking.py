@@ -6,9 +6,9 @@ import numpy as np
 from markdown_it import MarkdownIt
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-from entity_handlers.entity_extractor_markdown import extract_markdown_entities
-from entity_handlers.relationship_extractor_auto import extract_relationships
-from entity_handlers.clean_entites import canonicalize_entities
+from src.utilities.entity_handlers.entity_extractor_markdown import extract_markdown_entities
+from src.utilities.entity_handlers.relationship_extractor_auto import extract_relationships
+from src.utilities.entity_handlers.clean_entites import canonicalize_entities
 
 
 # =========================================================
@@ -160,7 +160,7 @@ def chunk_markdown_note(
 
     sections = parse_markdown_sections(md_text)
 
-    note_title = md_path.split("/")[-1].replace(".md", "")
+    note_title = md_path.split("\\")[-1].split("/")[-1].replace(".md", "")
 
     final_chunks = []
 
@@ -206,7 +206,7 @@ def chunk_markdown_note(
 
             chunk_id = str(uuid.uuid4())
             
-            entities = extract_markdown_entities(chunk)["entities"]
+            entities = extract_markdown_entities(chunk_text)["entities"]
         
             entities_cleaned  = canonicalize_entities(entities)
 

@@ -14,3 +14,7 @@ keybert
 yake
 rank-bm25
 psycopg2-binary
+fastapi
+python-multipart
+uvicorn
+mcp

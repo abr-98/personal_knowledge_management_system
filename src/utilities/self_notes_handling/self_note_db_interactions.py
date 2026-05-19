@@ -1,21 +1,16 @@
 import os
 import re
-import psycopg2
 from typing import List, Optional
+
+from src.infrastructure.database import DatabaseSettings, get_connection, load_database_settings
 
 
 # =========================================================
 # DATABASE CONNECTION
 # =========================================================
 
-def get_connection():
-    return psycopg2.connect(
-        host="localhost",
-        database="Pkms_db",
-        user="postgres",
-        password="1234",
-        port="5432"
-    )
+def _get_connection(settings: DatabaseSettings | None = None):
+    return get_connection(settings or load_database_settings())
 
 # =========================================================
 # MARKDOWN PARSING
@@ -52,9 +47,10 @@ def insert_note(
     md_file_path: str,
     tags: Optional[List[str]] = None,
     topics: Optional[List[str]] = None,
-    embedding: Optional[List[float]] = None
+    embedding: Optional[List[float]] = None,
+    settings: DatabaseSettings | None = None,
 ):
-    conn = get_connection()
+    conn = _get_connection(settings)
 
     try:
         # Read markdown file
@@ -100,11 +96,11 @@ def insert_note(
 
         conn.commit()
 
-        print(f"Inserted note with ID: {note_id}")
+        return note_id
 
     except Exception as e:
         conn.rollback()
-        print("Error:", e)
+        raise e
 
     finally:
         cur.close()
@@ -118,9 +114,10 @@ def insert_note(
 def search_notes(
     user_id: str,
     query: str,
-    limit: int = 5
+    limit: int = 5,
+    settings: DatabaseSettings | None = None,
 ):
-    conn = get_connection()
+    conn = _get_connection(settings)
 
     try:
         cur = conn.cursor()
@@ -164,8 +161,7 @@ def search_notes(
         return results
 
     except Exception as e:
-        print("Error:", e)
-        return []
+        raise e
 
     finally:
         cur.close()
@@ -178,9 +174,10 @@ def search_notes(
 
 def expand_backlinks(
     user_id: str,
-    note_titles: List[str]
+    note_titles: List[str],
+    settings: DatabaseSettings | None = None,
 ):
-    conn = get_connection()
+    conn = _get_connection(settings)
 
     try:
         cur = conn.cursor()
@@ -218,8 +215,7 @@ def expand_backlinks(
         return expanded
 
     except Exception as e:
-        print("Error:", e)
-        return []
+        raise e
 
     finally:
         cur.close()
@@ -232,7 +228,8 @@ def expand_backlinks(
 
 def retrieve_notes(
     user_id: str,
-    query: str
+    query: str,
+    settings: DatabaseSettings | None = None,
 ):
     """
     1. Full text search
@@ -240,7 +237,7 @@ def retrieve_notes(
     """
 
     # Step 1 — Search
-    search_results = search_notes(user_id, query)
+    search_results = search_notes(user_id, query, settings=settings)
 
     if not search_results:
         return []
@@ -249,7 +246,7 @@ def retrieve_notes(
     titles = [note["title"] for note in search_results]
 
     # Step 3 — Expand graph neighborhood
-    graph_results = expand_backlinks(user_id, titles)
+    graph_results = expand_backlinks(user_id, titles, settings=settings)
 
     # Merge uniquely
     unique_notes = {}

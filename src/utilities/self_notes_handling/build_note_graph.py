@@ -1,19 +1,15 @@
 
-import psycopg2
+from __future__ import annotations
+
+from src.infrastructure.database import DatabaseSettings, get_connection, load_database_settings
 
 
-def get_connection():
-    return psycopg2.connect(
-        host="localhost",
-        database="Pkms_db",
-        user="postgres",
-        password="1234",
-        port="5432"
-    )
+def _get_connection(settings: DatabaseSettings | None = None):
+    return get_connection(settings or load_database_settings())
 
 
 
-def build_notes_graph(user_id: str):
+def build_notes_graph(user_id: str, settings: DatabaseSettings | None = None):
     """
     Build a graph representation of all notes.
 
@@ -38,7 +34,7 @@ def build_notes_graph(user_id: str):
     }
     """
 
-    conn = get_connection()
+    conn = _get_connection(settings)
 
     try:
         cur = conn.cursor()
@@ -49,7 +45,7 @@ def build_notes_graph(user_id: str):
                 title,
                 tags,
                 topics,
-                links
+                backlinks
             FROM notes
             WHERE user_id = %s
         """, (user_id,))
@@ -96,11 +92,7 @@ def build_notes_graph(user_id: str):
         }
 
     except Exception as e:
-        print("Error:", e)
-        return {
-            "nodes": [],
-            "edges": []
-        }
+        raise e
 
     finally:
         cur.close()
