@@ -1,5 +1,6 @@
 import psycopg2
 
+
 def create_self_notes_table():
     conn = psycopg2.connect(host="localhost",
                             database= "Pkms_db",
@@ -12,33 +13,28 @@ def create_self_notes_table():
     cur = conn.cursor()
     
     try:
-        cur.execute("""
-            CREATE EXTENSION IF NOT EXISTS vector;
+        embedding_type = "DOUBLE PRECISION[]"
 
+        try:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            embedding_type = "vector(768)"
+        except Exception:
+            # pgvector may be unavailable on this server; fallback keeps startup working.
+            conn.rollback()
+
+        cur.execute(f"""
             CREATE TABLE IF NOT EXISTS notes (
                 id SERIAL PRIMARY KEY,
-
                 user_id VARCHAR(255) NOT NULL,
-
-
                 title TEXT NOT NULL,
-
                 file_path TEXT UNIQUE NOT NULL,
-
                 content TEXT NOT NULL,
-
                 backlinks TEXT[],
-
                 tags TEXT[],
-
                 topics TEXT[],
-
-                embedding vector(768),
-
+                embedding {embedding_type},
                 search_vector tsvector,
-
                 created_at TIMESTAMPTZ DEFAULT NOW(),
-
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             );
         """)
@@ -69,9 +65,6 @@ def create_self_notes_table():
             CREATE INDEX IF NOT EXISTS idx_notes_user_id
             ON notes(user_id);
         """)
-        
-        conn.commit()
-        
         
         conn.commit()
     except Exception as e:
