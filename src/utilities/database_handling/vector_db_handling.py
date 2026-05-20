@@ -16,6 +16,7 @@ pip install chromadb sentence-transformers
 """
 
 import chromadb
+import re
 
 from sentence_transformers import (
     SentenceTransformer
@@ -50,8 +51,9 @@ class VectorStore:
         )
 
         # -----------------------------------------
-        # Create/load collection
+        # Base collection (fallback when no domain is available)
         # -----------------------------------------
+        self.default_collection_name = collection_name
         self.collection = (
             self.client.get_or_create_collection(
                 name=collection_name
@@ -75,6 +77,37 @@ class VectorStore:
         )
 
         return embedding.tolist()
+
+    def _normalize_collection_name(self, domain):
+
+        if not domain:
+            return self.default_collection_name
+
+        normalized = re.sub(
+            r"[^a-zA-Z0-9_-]+",
+            "_",
+            str(domain).strip().lower()
+        ).strip("_")
+
+        if not normalized:
+            return self.default_collection_name
+
+        return f"{self.default_collection_name}_{normalized}"
+
+    def _get_collection_for_item(self, item):
+
+        domain = item.get("domain")
+
+        if not domain:
+            meta_details = item.get("meta_details", {})
+            if isinstance(meta_details, dict):
+                domain = meta_details.get("domain")
+
+        collection_name = self._normalize_collection_name(domain)
+
+        return self.client.get_or_create_collection(
+            name=collection_name
+        )
 
     # =====================================================
     # PREPARE METADATA
@@ -192,8 +225,11 @@ class VectorStore:
                 item
             )
         )
+        metadata["domain"] = str(item.get("domain", ""))
 
-        self.collection.add(
+        collection = self._get_collection_for_item(item)
+
+        collection.add(
 
             ids=[chunk_id],
 
@@ -209,13 +245,7 @@ class VectorStore:
     # =====================================================
     def add_items(self, items):
 
-        ids = []
-
-        embeddings = []
-
-        documents = []
-
-        metadatas = []
+        grouped_payload = {}
 
         for item in items:
 
@@ -227,43 +257,48 @@ class VectorStore:
             if not text.strip():
                 continue
 
+            collection = self._get_collection_for_item(item)
+            collection_name = collection.name
+
+            if collection_name not in grouped_payload:
+                grouped_payload[collection_name] = {
+                    "collection": collection,
+                    "ids": [],
+                    "embeddings": [],
+                    "documents": [],
+                    "metadatas": []
+                }
+
             chunk_id = str(
                 item.get(
                     "chunk_id"
                 )
             )
 
-            ids.append(chunk_id)
+            metadata = self.prepare_metadata(
+                item
+            )
+            metadata["domain"] = str(item.get("domain", ""))
 
-            documents.append(text)
-
-            embeddings.append(
-
+            grouped_payload[collection_name]["ids"].append(chunk_id)
+            grouped_payload[collection_name]["documents"].append(text)
+            grouped_payload[collection_name]["embeddings"].append(
                 self.create_embedding(
                     text
                 )
             )
+            grouped_payload[collection_name]["metadatas"].append(metadata)
 
-            metadatas.append(
+        for payload in grouped_payload.values():
+            if len(payload["ids"]) == 0:
+                continue
 
-                self.prepare_metadata(
-                    item
-                )
+            payload["collection"].add(
+                ids=payload["ids"],
+                embeddings=payload["embeddings"],
+                documents=payload["documents"],
+                metadatas=payload["metadatas"]
             )
-
-        if len(ids) == 0:
-            return
-
-        self.collection.add(
-
-            ids=ids,
-
-            embeddings=embeddings,
-
-            documents=documents,
-
-            metadatas=metadatas
-        )
 
     # =====================================================
     # SEARCH

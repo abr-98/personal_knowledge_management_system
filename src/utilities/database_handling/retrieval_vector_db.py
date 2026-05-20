@@ -18,6 +18,7 @@ pip install chromadb sentence-transformers rank-bm25 torch
 
 import chromadb
 import numpy as np
+import re
 
 from rank_bm25 import BM25Okapi
 
@@ -47,12 +48,34 @@ cross_encoder = CrossEncoder(
 # CHROMA CLIENT
 # =========================================================
 client = chromadb.PersistentClient(
-    path="./pkms_db"
+    path="./vector_db"
 )
 
-collection = client.get_collection(
-    "knowledge_base"
-)
+DEFAULT_COLLECTION_NAME = "pkms"
+
+
+def _normalize_collection_name(domain=None):
+
+    if not domain:
+        return DEFAULT_COLLECTION_NAME
+
+    normalized = re.sub(
+        r"[^a-zA-Z0-9_-]+",
+        "_",
+        str(domain).strip().lower()
+    ).strip("_")
+
+    if not normalized:
+        return DEFAULT_COLLECTION_NAME
+
+    return f"{DEFAULT_COLLECTION_NAME}_{normalized}"
+
+
+def _get_collection(domain=None):
+
+    return client.get_or_create_collection(
+        _normalize_collection_name(domain)
+    )
 
 
 # =========================================================
@@ -60,7 +83,9 @@ collection = client.get_collection(
 # =========================================================
 class BM25Retriever:
 
-    def __init__(self):
+    def __init__(self, domain=None):
+
+        self.collection = _get_collection(domain)
 
         self.documents = []
 
@@ -75,7 +100,7 @@ class BM25Retriever:
     # =====================================================
     def load_documents(self):
 
-        results = collection.get(
+        results = self.collection.get(
             include=[
                 "documents",
                 "metadatas"
@@ -98,9 +123,10 @@ class BM25Retriever:
             for doc in self.documents
         ]
 
-        self.bm25 = BM25Okapi(
-            self.tokenized_docs
-        )
+        if len(self.tokenized_docs) > 0:
+            self.bm25 = BM25Okapi(
+                self.tokenized_docs
+            )
 
     # =====================================================
     # SEARCH
@@ -113,6 +139,9 @@ class BM25Retriever:
 
         top_k=10
     ):
+
+        if not self.bm25:
+            return []
 
         tokenized_query = (
             query.lower().split()
@@ -169,8 +198,12 @@ def dense_search(
 
     query,
 
+    domain=None,
+
     top_k=10
 ):
+
+    collection = _get_collection(domain)
 
     query_embedding = (
         embedding_model.encode(
@@ -361,9 +394,11 @@ def rerank_cross_encoder(
 # =========================================================
 class HybridRetriever:
 
-    def __init__(self):
+    def __init__(self, domain=None):
 
-        self.bm25 = BM25Retriever()
+        self.domain = domain
+
+        self.bm25 = BM25Retriever(domain=domain)
 
         self.bm25.load_documents()
 
@@ -376,12 +411,21 @@ class HybridRetriever:
 
         query,
 
+        domain=None,
+
         dense_k=15,
 
         bm25_k=15,
 
         final_k=5
     ):
+
+        active_domain = domain if domain is not None else self.domain
+
+        bm25_retriever = self.bm25
+        if active_domain != self.domain:
+            bm25_retriever = BM25Retriever(domain=active_domain)
+            bm25_retriever.load_documents()
 
         # -----------------------------------------
         # Dense retrieval
@@ -390,13 +434,15 @@ class HybridRetriever:
 
             query,
 
+            domain=active_domain,
+
             top_k=dense_k
         )
 
         # -----------------------------------------
         # BM25 retrieval
         # -----------------------------------------
-        bm25_results = self.bm25.search(
+        bm25_results = bm25_retriever.search(
 
             query,
 
