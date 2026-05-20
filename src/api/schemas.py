@@ -85,7 +85,6 @@ class TokenUsageRequest(BaseModel):
 class RecordUploadRequest(BaseModel):
     user_id: str = Field(min_length=1)
     link: str | None = None
-    path: str | None = None
     domain: str | None = None
     source: str | None = None
     tags: list[str] = Field(default_factory=list)

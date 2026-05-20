@@ -153,11 +153,12 @@ def record_token_usage(
 @records_router.post("", response_model=RecordResponse | RecordUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_or_create_record(
     user_id: str = Form(...),
-    domain: str = Form(...),
+    domain: str | None = Form(None),
     source: str | None = Form(None),
     link: str | None = Form(None),
-    path: str | None = Form(None),
-    record_type: RecordType | None = Form(None, alias="type"),
+    record_type: RecordType | None = Form(None),
+    report_type: RecordType | None = Form(None),
+    type_alias: RecordType | None = Form(None, alias="type"),
     file: UploadFile | None = File(None),
     tags: list[str] = Form(default_factory=list),
     topics: list[str] = Form(default_factory=list),
@@ -165,31 +166,37 @@ async def upload_or_create_record(
     record_service: RecordService = Depends(get_record_service),
 ) -> RecordResponse | RecordUploadResponse:
     """
-    Unified endpoint for uploading files or creating records with links/paths.
-    
-    - If file is provided: ingests the file and creates a record with the stored path
-    - If link or path is provided: creates a record with the provided link or path
-    - Either file OR (link/path) must be provided, not both
+    Unified endpoint for uploading files or creating records with links.
+
+    - If file is provided: saves under records/<type>/ and stores relative path in DB
+    - If link is provided: creates a record with the external link
+    - Either file OR link must be provided, not both
     """
     # Handle file upload
     if file:
-        if not record_type:
+        resolved_record_type = record_type or report_type or type_alias
+        if not resolved_record_type and domain:
+            try:
+                resolved_record_type = RecordType(domain)
+            except ValueError:
+                resolved_record_type = None
+
+        if not resolved_record_type:
             raise ValidationError("record_type is required when uploading a file.")
-        if link or path:
-            raise ValidationError("Provide either a file OR link/path, not both.")
+        if link:
+            raise ValidationError("Provide either a file OR link, not both.")
         
         content = await file.read()
         result = ingestion_service.ingest_file(
-            record_type=record_type.value,
+            record_type=resolved_record_type.value,
             file_name=file.filename or "",
             file_content=content,
         )
 
         record = record_service.create_record(
             user_id=user_id,
-            link=result["stored_path"],  # type: ignore
-            path=None,
-            domain=result.get("record_type", record_type.value),  # type: ignore
+            stored_path=result["stored_path"],  # type: ignore
+            domain=result.get("record_type", resolved_record_type.value),  # type: ignore
             source=source or "upload",
             tags=tags,
             topics=topics,
@@ -202,13 +209,14 @@ async def upload_or_create_record(
             "user_id": record.user_id,
         }
         return RecordUploadResponse(**result)
-    
-    # Handle link or path record creation
+
+    # Handle link record creation
     else:
+        if domain is None:
+            raise ValidationError("domain is required when creating a link record.")
         record = record_service.create_record(
             user_id=user_id,
             link=link,
-            path=path,
             domain=domain,
             source=source,
             tags=tags,

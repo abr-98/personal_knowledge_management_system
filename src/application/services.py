@@ -158,26 +158,25 @@ class RecordService:
         user_id: str,
         domain: str,
         link: str | None = None,
-        path: str | None = None,
+        stored_path: str | None = None,
         source: str | None = None,
         tags: list[str] | None = None,
         topics: list[str] | None = None,
     ) -> Record:
         if not user_id.strip():
             raise ValidationError("User ID is required.")
-        
-        # Determine link_or_path from link or path
+
+        # Determine link_or_path from external link or internal stored path.
         link_stripped = link.strip() if link else None
-        path_stripped = path.strip() if path else None
-        
-        # Validate that exactly one of link or path is provided
-        if link_stripped and path_stripped:
-            raise ValidationError("Provide either link or path, not both.")
-        if not link_stripped and not path_stripped:
-            raise ValidationError("Either link or path is required.")
-        
-        link_or_path: str = link_stripped or path_stripped  # type: ignore
-        
+        stored_path_stripped = stored_path.strip() if stored_path else None
+
+        if link_stripped and stored_path_stripped:
+            raise ValidationError("Provide either link or uploaded file, not both.")
+        if not link_stripped and not stored_path_stripped:
+            raise ValidationError("Either link or uploaded file is required.")
+
+        link_or_path: str = link_stripped or stored_path_stripped  # type: ignore
+
         if not domain.strip():
             raise ValidationError("domain is required.")
         return self.repository.create_record(
@@ -364,11 +363,12 @@ class IngestionService:
         destination_dir.mkdir(parents=True, exist_ok=True)
         destination_path = self._next_available_path(destination_dir / safe_name)
         destination_path.write_bytes(file_content)
+        relative_stored_path = destination_path.relative_to(self.records_root.parent).as_posix()
 
         chunks = self._chunk_for_type(normalized_type, destination_path)
         return {
             "file_name": destination_path.name,
-            "stored_path": str(destination_path.as_posix()),
+            "stored_path": str(relative_stored_path),
             "record_type": normalized_type,
             "chunk_count": len(chunks),
         }
