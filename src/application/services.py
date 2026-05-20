@@ -156,21 +156,33 @@ class RecordService:
     def create_record(
         self,
         user_id: str,
-        link_or_path: str,
         domain: str,
+        link: str | None = None,
+        path: str | None = None,
         source: str | None = None,
         tags: list[str] | None = None,
         topics: list[str] | None = None,
     ) -> Record:
         if not user_id.strip():
             raise ValidationError("User ID is required.")
-        if not link_or_path.strip():
-            raise ValidationError("link_or_path is required.")
+        
+        # Determine link_or_path from link or path
+        link_stripped = link.strip() if link else None
+        path_stripped = path.strip() if path else None
+        
+        # Validate that exactly one of link or path is provided
+        if link_stripped and path_stripped:
+            raise ValidationError("Provide either link or path, not both.")
+        if not link_stripped and not path_stripped:
+            raise ValidationError("Either link or path is required.")
+        
+        link_or_path: str = link_stripped or path_stripped  # type: ignore
+        
         if not domain.strip():
             raise ValidationError("domain is required.")
         return self.repository.create_record(
             user_id=user_id.strip(),
-            link_or_path=link_or_path.strip(),
+            link_or_path=link_or_path,
             domain=domain.strip(),
             source=source.strip() if source else None,
             tags=tags,
@@ -196,18 +208,15 @@ class RecordService:
         self,
         user_id: str,
         record_id: int,
-        link_or_path: str | None = None,
-        source: str | None = None,
-        domain: str | None = None,
         tags: list[str] | None = None,
         topics: list[str] | None = None,
     ) -> Record:
         updated = self.repository.update_record(
             user_id=user_id,
             record_id=record_id,
-            link_or_path=link_or_path.strip() if link_or_path else None,
-            source=source.strip() if source else None,
-            domain=domain.strip() if domain else None,
+            link_or_path=None,
+            source=None,
+            domain=None,
             tags=tags,
             topics=topics,
         )

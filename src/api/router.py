@@ -19,7 +19,7 @@ from src.api.schemas import (
     ChatThreadUpdateRequest,
     DeleteResponse,
     LoginRequest,
-    RecordCreateRequest,
+    RecordUploadRequest,
     RecordType,
     RecordUploadResponse,
     RecordResponse,
@@ -33,8 +33,11 @@ from src.api.schemas import (
     WorkItemCreateRequest,
     WorkItemResponse,
     WorkItemUpdateRequest,
+    WorkItemOptionsResponse,
 )
 from src.application.services import AuthService, ChatService, IngestionService, RecordService, TimelineService, WorkItemService
+from src.domain.entities import WorkItemStatus, WorkItemPriority
+from src.domain.errors import ValidationError
 
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
@@ -147,44 +150,71 @@ def record_token_usage(
     )
 
 
-@records_router.post("", response_model=RecordResponse, status_code=status.HTTP_201_CREATED)
-def create_record(
-    payload: RecordCreateRequest,
-    service: RecordService = Depends(get_record_service),
-) -> RecordResponse:
-    return service.create_record(
-        user_id=payload.user_id,
-        link_or_path=payload.link_or_path,
-        domain=payload.domain,
-        source=payload.source,
-        tags=payload.tags,
-        topics=payload.topics,
-    )
-
-
-@records_router.post("/upload", response_model=RecordUploadResponse, status_code=status.HTTP_201_CREATED)
-async def upload_record_file(
+@records_router.post("", response_model=RecordResponse | RecordUploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_or_create_record(
     user_id: str = Form(...),
-    record_type: RecordType = Form(..., alias="type"),
-    file: UploadFile = File(...),
+    domain: str = Form(...),
+    source: str | None = Form(None),
+    link: str | None = Form(None),
+    path: str | None = Form(None),
+    record_type: RecordType | None = Form(None, alias="type"),
+    file: UploadFile | None = File(None),
+    tags: list[str] = Form(default_factory=list),
+    topics: list[str] = Form(default_factory=list),
     ingestion_service: IngestionService = Depends(get_ingestion_service),
     record_service: RecordService = Depends(get_record_service),
-) -> RecordUploadResponse:
-    content = await file.read()
-    result = ingestion_service.ingest_file(
-        record_type=record_type.value,
-        file_name=file.filename or "",
-        file_content=content,
-    )
+) -> RecordResponse | RecordUploadResponse:
+    """
+    Unified endpoint for uploading files or creating records with links/paths.
+    
+    - If file is provided: ingests the file and creates a record with the stored path
+    - If link or path is provided: creates a record with the provided link or path
+    - Either file OR (link/path) must be provided, not both
+    """
+    # Handle file upload
+    if file:
+        if not record_type:
+            raise ValidationError("record_type is required when uploading a file.")
+        if link or path:
+            raise ValidationError("Provide either a file OR link/path, not both.")
+        
+        content = await file.read()
+        result = ingestion_service.ingest_file(
+            record_type=record_type.value,
+            file_name=file.filename or "",
+            file_content=content,
+        )
 
-    record_service.create_record(
-        user_id=user_id,
-        link_or_path=result["stored_path"],
-        domain=record_type.value,
-        source="upload",
-    )
-
-    return RecordUploadResponse(**result)
+        record = record_service.create_record(
+            user_id=user_id,
+            link=result["stored_path"],  # type: ignore
+            path=None,
+            domain=result.get("record_type", record_type.value),  # type: ignore
+            source=source or "upload",
+            tags=tags,
+            topics=topics,
+        )
+        
+        # Return both upload response and record
+        response_data = {
+            **result,
+            "id": record.id,
+            "user_id": record.user_id,
+        }
+        return RecordUploadResponse(**result)
+    
+    # Handle link or path record creation
+    else:
+        record = record_service.create_record(
+            user_id=user_id,
+            link=link,
+            path=path,
+            domain=domain,
+            source=source,
+            tags=tags,
+            topics=topics,
+        )
+        return record
 
 
 @records_router.get("", response_model=list[RecordResponse])
@@ -227,12 +257,28 @@ def delete_record(
     return DeleteResponse()
 
 
+@workitems_router.get("/options", response_model=WorkItemOptionsResponse)
+def get_workitem_options() -> WorkItemOptionsResponse:
+    """Get available status and priority options for work items."""
+    return WorkItemOptionsResponse(
+        statuses=[status.value for status in WorkItemStatus],
+        priorities=[priority.value for priority in WorkItemPriority],
+    )
+
+
 @workitems_router.post("", response_model=WorkItemResponse, status_code=status.HTTP_201_CREATED)
 def create_workitem(
     payload: WorkItemCreateRequest,
+    status: WorkItemStatus = WorkItemStatus.PENDING,
+    priority: WorkItemPriority = WorkItemPriority.MEDIUM,
     service: WorkItemService = Depends(get_workitem_service),
 ) -> WorkItemResponse:
-    return service.create_workitem(user_id=payload.user_id, **payload.model_dump(exclude={"user_id"}))
+    return service.create_workitem(
+        user_id=payload.user_id,
+        status=status,
+        priority=priority,
+        **payload.model_dump(exclude={"user_id"}),
+    )
 
 
 @workitems_router.get("", response_model=list[WorkItemResponse])
@@ -259,9 +305,16 @@ def update_workitem(
     workitem_id: int,
     user_id: str,
     payload: WorkItemUpdateRequest,
+    status: WorkItemStatus | None = None,
+    priority: WorkItemPriority | None = None,
     service: WorkItemService = Depends(get_workitem_service),
 ) -> WorkItemResponse:
-    return service.update_workitem(user_id=user_id, workitem_id=workitem_id, **payload.model_dump(exclude_none=True))
+    update_data = payload.model_dump(exclude_none=True)
+    if status is not None:
+        update_data["status"] = status
+    if priority is not None:
+        update_data["priority"] = priority
+    return service.update_workitem(user_id=user_id, workitem_id=workitem_id, **update_data)
 
 
 @workitems_router.delete("/{workitem_id}", response_model=DeleteResponse)

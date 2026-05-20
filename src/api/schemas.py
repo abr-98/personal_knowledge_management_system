@@ -82,19 +82,18 @@ class TokenUsageRequest(BaseModel):
     timestamp: datetime | None = None
 
 
-class RecordCreateRequest(BaseModel):
+class RecordUploadRequest(BaseModel):
     user_id: str = Field(min_length=1)
-    link_or_path: str = Field(min_length=1)
-    domain: str = Field(min_length=1)
+    link: str | None = None
+    path: str | None = None
+    domain: str | None = None
     source: str | None = None
     tags: list[str] = Field(default_factory=list)
     topics: list[str] = Field(default_factory=list)
+    record_type: str | None = None  # For file uploads
 
 
 class RecordUpdateRequest(BaseModel):
-    link_or_path: str | None = None
-    domain: str | None = None
-    source: str | None = None
     tags: list[str] | None = None
     topics: list[str] | None = None
 
@@ -116,8 +115,6 @@ class WorkItemCreateRequest(BaseModel):
     user_id: str = Field(min_length=1)
     title: str = Field(min_length=1)
     description: str | None = None
-    status: WorkItemStatus = WorkItemStatus.PENDING
-    priority: WorkItemPriority = WorkItemPriority.MEDIUM
     related_notes: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     topics: list[str] = Field(default_factory=list)
@@ -127,8 +124,6 @@ class WorkItemCreateRequest(BaseModel):
 class WorkItemUpdateRequest(BaseModel):
     title: str | None = None
     description: str | None = None
-    status: WorkItemStatus | None = None
-    priority: WorkItemPriority | None = None
     related_notes: list[str] | None = None
     tags: list[str] | None = None
     topics: list[str] | None = None
@@ -190,6 +185,11 @@ class TimelineEventResponse(BaseModel):
 
 class DeleteResponse(BaseModel):
     deleted: bool = True
+
+
+class WorkItemOptionsResponse(BaseModel):
+    statuses: list[str]
+    priorities: list[str]
 
 
 class HealthResponse(BaseModel):
