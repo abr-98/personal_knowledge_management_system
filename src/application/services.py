@@ -345,6 +345,8 @@ class IngestionService:
         return sorted([folder.name for folder in self.records_root.iterdir() if folder.is_dir()])
 
     def ingest_file(self, record_type: str, file_name: str, file_content: bytes) -> dict[str, str | int]:
+        """Save the file to disk and return metadata. Chunking is NOT performed here;
+        call chunk_saved_file() as a background task after this returns."""
         normalized_type = record_type.strip().lower()
         if not normalized_type:
             raise ValidationError("type is required.")
@@ -365,13 +367,17 @@ class IngestionService:
         destination_path.write_bytes(file_content)
         relative_stored_path = destination_path.relative_to(self.records_root.parent).as_posix()
 
-        chunks = self._chunk_for_type(normalized_type, destination_path)
         return {
             "file_name": destination_path.name,
             "stored_path": str(relative_stored_path),
             "record_type": normalized_type,
-            "chunk_count": len(chunks),
+            "chunk_count": 0,
+            "_destination_path": str(destination_path),
         }
+
+    def chunk_saved_file(self, record_type: str, destination_path: str) -> None:
+        """Run chunking on an already-saved file. Intended for use as a background task."""
+        self._chunk_for_type(record_type, Path(destination_path))
 
     def _next_available_path(self, path: Path) -> Path:
         if not path.exists():

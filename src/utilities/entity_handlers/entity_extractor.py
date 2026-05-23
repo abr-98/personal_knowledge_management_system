@@ -37,7 +37,14 @@ from sklearn.feature_extraction.text import (
 # =========================================================
 # LOAD MODELS
 # =========================================================
-nlp = spacy.load("en_core_web_md")
+for _model_name in ("en_core_web_md", "en_core_web_sm"):
+    try:
+        nlp = spacy.load(_model_name)
+        break
+    except OSError:
+        continue
+else:
+    nlp = spacy.blank("en")
 
 kw_model = KeyBERT(
     model="all-MiniLM-L6-v2"

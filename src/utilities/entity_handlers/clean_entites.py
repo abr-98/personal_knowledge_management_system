@@ -25,7 +25,14 @@ from collections import Counter
 # =========================================================
 # LOAD MODEL
 # =========================================================
-nlp = spacy.load("en_core_web_md")
+for _model_name in ("en_core_web_md", "en_core_web_sm"):
+    try:
+        nlp = spacy.load(_model_name)
+        break
+    except OSError:
+        continue
+else:
+    nlp = spacy.blank("en")
 
 
 # =========================================================

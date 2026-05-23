@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile, status
 
 from src.api.dependencies import (
     get_auth_service,
@@ -152,6 +152,7 @@ def record_token_usage(
 
 @records_router.post("", response_model=RecordResponse | RecordUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_or_create_record(
+    background_tasks: BackgroundTasks,
     user_id: str = Form(...),
     domain: str | None = Form(None),
     source: str | None = Form(None),
@@ -191,6 +192,11 @@ async def upload_or_create_record(
             record_type=resolved_record_type.value,
             file_name=file.filename or "",
             file_content=content,
+        )
+        background_tasks.add_task(
+            ingestion_service.chunk_saved_file,
+            str(result["record_type"]),
+            str(result["_destination_path"]),
         )
 
         record = record_service.create_record(
